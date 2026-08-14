@@ -7,9 +7,16 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>World Clock</title>
 <style>
-  :root {
-    color-scheme: dark;
-  }
+  /* Layout is deliberately built with a real HTML <table> and no flexbox,
+     vw/vh units, or clamp() -- this iPad's Safari predates all of those
+     (it doesn't even have the Intl object), and a missing/ignored flexbox
+     declaration is almost certainly why the page was only filling about
+     half the screen: the rows fell back to their natural content height
+     instead of stretching to fill the viewport. Table layout has been
+     supported since the earliest CSS engines and reliably fills a sized
+     container. Font sizes are set in JS from the actual measured screen
+     size (see the script at the bottom) rather than relative CSS units,
+     for the same reason.  */
 
   * {
     margin: 0;
@@ -19,36 +26,36 @@
 
   html, body {
     height: 100%;
+    width: 100%;
     background: #000;
     overflow: hidden;
   }
 
   body {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-evenly;
-    align-items: stretch;
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
-    transition: filter 3s ease;
   }
 
   body.night-dim {
     filter: brightness(0.55);
   }
 
-  .row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    padding: 0 6vw;
-    border-bottom: 1px solid #1a1a1a;
-    transition: opacity 3s ease;
+  #clock-table {
+    width: 100%;
+    height: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
   }
 
-  .row:last-child {
+  .row td {
+    border-bottom: 1px solid #1a1a1a;
+    vertical-align: middle;
+    padding: 0 5%;
+  }
+
+  .row:last-child td {
     border-bottom: none;
   }
 
@@ -56,21 +63,23 @@
     opacity: 0.78;
   }
 
-  .city {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+  .city-cell {
+    width: 44%;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .time-cell {
+    width: 56%;
+    text-align: right;
+    overflow: hidden;
   }
 
   .city-name-line {
-    display: flex;
-    align-items: center;
-    gap: 0.5em;
+    white-space: nowrap;
   }
 
   .city-name {
-    font-size: 1.6rem;
-    font-size: clamp(1.1rem, 2.6vw, 2.1rem);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -78,11 +87,10 @@
   }
 
   .dot {
-    width: 0.5em;
-    height: 0.5em;
+    display: inline-block;
     border-radius: 50%;
     background: #444;
-    flex: none;
+    margin-left: 0.5em;
   }
 
   .dot.day {
@@ -96,11 +104,9 @@
   }
 
   .sub-line {
-    font-size: 0.9rem;
-    font-size: clamp(0.75rem, 1.3vw, 1.05rem);
     color: #555;
-    margin-top: 0.35em;
     letter-spacing: 0.03em;
+    white-space: nowrap;
   }
 
   .tz-label {
@@ -110,17 +116,12 @@
   .time {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
-    font-size: 5rem;
-    font-size: clamp(3rem, 12vw, 9rem);
     font-weight: 200;
     color: #f2f2f2;
-    line-height: 1;
-    letter-spacing: 0.01em;
     white-space: nowrap;
   }
 
   .time .secs {
-    font-size: 0.5em;
     color: #666;
   }
 
@@ -158,38 +159,46 @@
 </head>
 <body>
 
-  <div class="row home" data-tz="Australia/Sydney">
-    <div class="city">
+<table id="clock-table" cellspacing="0" cellpadding="0">
+  <tr class="row home" data-tz="Australia/Sydney">
+    <td class="city-cell">
       <div class="city-name-line">
-        <div class="city-name">Sydney</div>
-        <div class="dot"></div>
+        <span class="city-name">Sydney</span>
+        <span class="dot"></span>
       </div>
       <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
-    </div>
-    <div class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></div>
-  </div>
+    </td>
+    <td class="time-cell">
+      <span class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></span>
+    </td>
+  </tr>
 
-  <div class="row" data-tz="Australia/Brisbane">
-    <div class="city">
+  <tr class="row" data-tz="Australia/Brisbane">
+    <td class="city-cell">
       <div class="city-name-line">
-        <div class="city-name">Brisbane</div>
-        <div class="dot"></div>
+        <span class="city-name">Brisbane</span>
+        <span class="dot"></span>
       </div>
       <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
-    </div>
-    <div class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></div>
-  </div>
+    </td>
+    <td class="time-cell">
+      <span class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></span>
+    </td>
+  </tr>
 
-  <div class="row" data-tz="America/Toronto">
-    <div class="city">
+  <tr class="row" data-tz="America/Toronto">
+    <td class="city-cell">
       <div class="city-name-line">
-        <div class="city-name">Toronto</div>
-        <div class="dot"></div>
+        <span class="city-name">Toronto</span>
+        <span class="dot"></span>
       </div>
       <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
-    </div>
-    <div class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></div>
-  </div>
+    </td>
+    <td class="time-cell">
+      <span class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></span>
+    </td>
+  </tr>
+</table>
 
   <div id="fallback-msg"></div>
 
@@ -462,6 +471,67 @@
       setTimeout(tick, 1000 - (Date.now() % 1000));
     }
   }
+
+  // ---- Full-screen sizing, computed in JS from the actual measured viewport ----
+  // CSS vw/vh units and clamp() aren't reliable on this old a browser, so
+  // font sizes are set directly in pixels here from the real window
+  // dimensions instead. This runs independently of the <table> layout
+  // above (which handles the rows actually filling the screen height) --
+  // this part just makes sure the text inside is sized to match.
+  function applySizing() {
+    var vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+    var vh = window.innerHeight || document.documentElement.clientHeight || 768;
+    var rowH = vh / 3;
+
+    var namePx = Math.round(rowH * 0.15);
+    var subPx = Math.round(rowH * 0.085);
+    var dotPx = Math.max(6, Math.round(namePx * 0.4));
+    var padPx = Math.round(vw * 0.04);
+
+    // The time column is 56% of the width (see .time-cell in the
+    // stylesheet); fit "HH:MM:SS" (8 characters, tabular digits run
+    // roughly 0.6em wide each, colons narrower) inside it with a safety
+    // margin, rather than just sizing off the row height -- otherwise the
+    // seconds can run past the edge of the screen on a wide/short display.
+    var timeCellW = vw * 0.56 - padPx * 2;
+    var timePxByWidth = Math.floor(timeCellW / 4.6);
+    var timePx = Math.max(20, Math.min(timePxByWidth, Math.round(rowH * 0.55)));
+
+    var i, els;
+
+    els = toArray(document.querySelectorAll('.time'));
+    for (i = 0; i < els.length; i++) els[i].style.fontSize = timePx + 'px';
+
+    els = toArray(document.querySelectorAll('.city-name'));
+    for (i = 0; i < els.length; i++) els[i].style.fontSize = namePx + 'px';
+
+    els = toArray(document.querySelectorAll('.sub-line'));
+    for (i = 0; i < els.length; i++) {
+      els[i].style.fontSize = subPx + 'px';
+      els[i].style.marginTop = Math.round(subPx * 0.4) + 'px';
+    }
+
+    els = toArray(document.querySelectorAll('.dot'));
+    for (i = 0; i < els.length; i++) {
+      els[i].style.width = dotPx + 'px';
+      els[i].style.height = dotPx + 'px';
+    }
+
+    els = toArray(document.querySelectorAll('.row td'));
+    for (i = 0; i < els.length; i++) els[i].style.padding = '0 ' + padPx + 'px';
+  }
+
+  try {
+    applySizing();
+    if (window.addEventListener) {
+      window.addEventListener('resize', applySizing);
+      window.addEventListener('orientationchange', function () {
+        // Old iOS sometimes reports stale innerWidth/innerHeight the instant
+        // orientationchange fires -- re-measure once the rotation settles.
+        setTimeout(applySizing, 300);
+      });
+    }
+  } catch (e) { /* sizing is cosmetic -- don't let it block the clock starting */ }
 
   try {
     rows = buildRows();
