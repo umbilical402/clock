@@ -200,9 +200,70 @@
   // updated any more, so it deliberately avoids anything added to the
   // language or the Intl API after roughly 2016.
 
+  var HAS_INTL = (typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function');
+
   function pad2(s) {
     s = String(s);
     return s.length < 2 ? '0' + s : s;
+  }
+
+  // ---- Manual, Intl-free fallback for the exact three zones this clock uses ----
+  // Some Safari/iPadOS builds too old to update don't have the Intl object at
+  // all (not just missing pieces of it) -- this hand-codes the current DST
+  // rules for these regions using nothing but the plain Date object, which
+  // has existed since the earliest JavaScript engines. It's correct for the
+  // foreseeable future, but unlike Intl won't auto-update if a government
+  // changes its DST rules down the track.
+  var DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function nthSundayUTC(year, monthIndex0, n) {
+    var firstDay = new Date(Date.UTC(year, monthIndex0, 1)).getUTCDay();
+    var firstSunday = 1 + ((7 - firstDay) % 7);
+    return firstSunday + (n - 1) * 7;
+  }
+
+  function manualZoneInfo(tz, nowMs) {
+    var y = new Date(nowMs).getUTCFullYear();
+    if (tz === 'Australia/Brisbane') return { offset: 600, abbr: 'AEST' };
+    if (tz === 'Australia/Sydney') {
+      // AU eastern DST: starts first Sunday of October 2am AEST, ends first
+      // Sunday of April 3am AEDT. Spans the New Year, so both boundaries are
+      // computed off the same calendar year as "now".
+      var dstStart = Date.UTC(y, 9, nthSundayUTC(y, 9, 1), 2, 0, 0) - 600 * 60000;
+      var dstEnd = Date.UTC(y, 3, nthSundayUTC(y, 3, 1), 3, 0, 0) - 660 * 60000;
+      var isDst = (nowMs >= dstStart) || (nowMs < dstEnd);
+      return isDst ? { offset: 660, abbr: 'AEDT' } : { offset: 600, abbr: 'AEST' };
+    }
+    if (tz === 'America/Toronto') {
+      // US/Canada DST: starts 2nd Sunday of March 2am EST, ends 1st Sunday
+      // of November 2am EDT. Doesn't span the New Year.
+      var dstStart2 = Date.UTC(y, 2, nthSundayUTC(y, 2, 2), 2, 0, 0) + 300 * 60000;
+      var dstEnd2 = Date.UTC(y, 10, nthSundayUTC(y, 10, 1), 2, 0, 0) + 240 * 60000;
+      var isDst2 = (nowMs >= dstStart2) && (nowMs < dstEnd2);
+      return isDst2 ? { offset: -240, abbr: 'EDT' } : { offset: -300, abbr: 'EST' };
+    }
+    return { offset: 0, abbr: '' };
+  }
+
+  function offsetLabel(offsetMin) {
+    var sign = offsetMin >= 0 ? '+' : '-';
+    var abs = Math.abs(offsetMin);
+    var h = Math.floor(abs / 60);
+    var mm = abs % 60;
+    return 'UTC' + sign + h + (mm ? ':' + pad2(mm) : '');
+  }
+
+  function manualParts(tz, nowMs) {
+    var info = manualZoneInfo(tz, nowMs);
+    var local = new Date(nowMs + info.offset * 60000);
+    return {
+      hour: pad2(local.getUTCHours()),
+      minute: pad2(local.getUTCMinutes()),
+      second: pad2(local.getUTCSeconds()),
+      dateLabel: DAY_NAMES[local.getUTCDay()] + ' ' + local.getUTCDate() + ' ' + MONTH_NAMES[local.getUTCMonth()],
+      tzLabel: info.abbr + ' · ' + offsetLabel(info.offset)
+    };
   }
 
   // Pulls "HH:MM:SS" out of a formatted time string regardless of the exact
@@ -290,6 +351,28 @@
     return parts ? Number(parts.hour) : null;
   }
 
+  // Single entry point tick() calls per row: prefers Intl (it stays correct
+  // automatically if a government ever changes DST rules), and falls back to
+  // the manual, Intl-free calculation above -- either because Intl isn't
+  // there at all, or because some call into it failed unexpectedly.
+  function getAllParts(tz, date) {
+    if (HAS_INTL) {
+      try {
+        var t = getTimeParts(tz, date);
+        if (t) {
+          return {
+            hour: t.hour,
+            minute: t.minute,
+            second: t.second,
+            dateLabel: getDateLabel(tz, date),
+            tzLabel: getTzLabel(tz, date)
+          };
+        }
+      } catch (e) { /* fall through to the manual calculation below */ }
+    }
+    return manualParts(tz, date.getTime());
+  }
+
   function toArray(nodeList) {
     return Array.prototype.slice.call(nodeList);
   }
@@ -333,38 +416,32 @@
     try {
       var now = new Date();
 
+      var sydneyHour = null;
+
       for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         try {
-          var t = getTimeParts(r.tz, now);
-          if (t) {
-            r.hourEl.textContent = t.hour;
-            r.minuteEl.textContent = t.minute;
-            r.secsEl.textContent = t.second;
-          }
-          if (r.dateEl) r.dateEl.textContent = getDateLabel(r.tz, now);
+          var p = getAllParts(r.tz, now);
 
-          var hour24 = t ? Number(t.hour) : null;
-          if (hour24 !== null) {
-            var isDay = hour24 >= 6 && hour24 < 18;
-            setClass(r.dotEl, 'day', isDay);
-            setClass(r.dotEl, 'night', !isDay);
-            setClass(r.row, 'is-night', !isDay);
-          }
+          r.hourEl.textContent = p.hour;
+          r.minuteEl.textContent = p.minute;
+          r.secsEl.textContent = p.second;
+          if (r.dateEl) r.dateEl.textContent = p.dateLabel;
 
-          // The tz label only ever changes on a DST transition -- once a
-          // minute is plenty, no need to recompute it every second.
-          var minuteNum = t ? Number(t.minute) : null;
-          if (r.labelEl && minuteNum !== r.lastLabelMinute) {
-            r.labelEl.textContent = getTzLabel(r.tz, now);
-            r.lastLabelMinute = minuteNum;
-          }
+          var hour24 = Number(p.hour);
+          var isDay = hour24 >= 6 && hour24 < 18;
+          setClass(r.dotEl, 'day', isDay);
+          setClass(r.dotEl, 'night', !isDay);
+          setClass(r.row, 'is-night', !isDay);
+
+          if (r.labelEl) r.labelEl.textContent = p.tzLabel;
+
+          if (r.tz === 'Australia/Sydney') sydneyHour = hour24;
         } catch (rowErr) {
           // One city failing shouldn't blank out the others.
         }
       }
 
-      var sydneyHour = getLocalHour('Australia/Sydney', now);
       if (sydneyHour !== null) {
         setClass(document.body, 'night-dim', sydneyHour >= 22 || sydneyHour < 6);
       }
@@ -373,7 +450,7 @@
     } catch (err) {
       tickFailCount++;
       if (tickFailCount === 3) {
-        showFallback('This Safari/iPadOS version is too old for some of the clock’s time-zone code. Let Glen know the exact error: ' + (err && err.message ? err.message : err));
+        showFallback('Something unexpected is stopping the clock from updating. Let Glen know the exact error: ' + (err && err.message ? err.message : err));
       }
     }
 
@@ -388,13 +465,9 @@
 
   try {
     rows = buildRows();
-    // Sanity-check that Intl can actually do timezone-aware formatting at
-    // all before starting the clock -- on a genuinely ancient Safari this
-    // throws immediately rather than a few seconds in.
-    new Intl.DateTimeFormat('en-GB', { timeZone: 'Australia/Sydney' }).format(new Date());
     tick();
   } catch (e) {
-    showFallback('This iPad’s Safari can’t do time-zone-aware clocks at all (' + (e && e.message ? e.message : e) + '). Let Glen know so he can build a version that doesn’t rely on it.');
+    showFallback('The clock failed to start (' + (e && e.message ? e.message : e) + '). Let Glen know.');
   }
 
   // Keep the screen awake where supported (iOS 16.4+). Fails silently on
