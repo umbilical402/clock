@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>World Clock</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    align-items: stretch;
+    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    transition: filter 3s ease;
+  }
+
+  body.night-dim {
+    filter: brightness(0.55);
+  }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0 6vw;
+    border-bottom: 1px solid #1a1a1a;
+    transition: opacity 3s ease;
+  }
+
+  .row:last-child {
+    border-bottom: none;
+  }
+
+  .row.is-night {
+    opacity: 0.78;
+  }
+
+  .city {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .city-name-line {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+  }
+
+  .city-name {
+    font-size: clamp(1.1rem, 2.6vw, 2.1rem);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #888;
+  }
+
+  .dot {
+    width: 0.5em;
+    height: 0.5em;
+    border-radius: 50%;
+    background: #444;
+    flex: none;
+  }
+
+  .dot.day {
+    background: #e8b93f;
+    box-shadow: 0 0 0.5em rgba(232, 185, 63, 0.55);
+  }
+
+  .dot.night {
+    background: #5b6ea8;
+    box-shadow: 0 0 0.5em rgba(91, 110, 168, 0.55);
+  }
+
+  .sub-line {
+    font-size: clamp(0.75rem, 1.3vw, 1.05rem);
+    color: #555;
+    margin-top: 0.35em;
+    letter-spacing: 0.03em;
+  }
+
+  .tz-label {
+    color: #666;
+  }
+
+  .time {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    font-size: clamp(3rem, 12vw, 9rem);
+    font-weight: 200;
+    color: #f2f2f2;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  .time .secs {
+    font-size: 0.5em;
+    color: #666;
+  }
+
+  .time .colon {
+    display: inline-block;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%   { opacity: 1; }
+    50%  { opacity: 0.25; }
+    100% { opacity: 1; }
+  }
+
+  .home .time {
+    color: #ffffff;
+  }
+
+  .home .city-name {
+    color: #aaa;
+  }
+</style>
+</head>
+<body>
+
+  <div class="row home" data-tz="Australia/Sydney">
+    <div class="city">
+      <div class="city-name-line">
+        <div class="city-name">Sydney</div>
+        <div class="dot"></div>
+      </div>
+      <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
+    </div>
+    <div class="time"><span class="hour"></span><span class="colon">:</span><span class="minute"></span><span class="colon">:</span><span class="secs"></span></div>
+  </div>
+
+  <div class="row" data-tz="Australia/Brisbane">
+    <div class="city">
+      <div class="city-name-line">
+        <div class="city-name">Brisbane</div>
+        <div class="dot"></div>
+      </div>
+      <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
+    </div>
+    <div class="time"><span class="hour"></span><span class="colon">:</span><span class="minute"></span><span class="colon">:</span><span class="secs"></span></div>
+  </div>
+
+  <div class="row" data-tz="America/Toronto">
+    <div class="city">
+      <div class="city-name-line">
+        <div class="city-name">Toronto</div>
+        <div class="dot"></div>
+      </div>
+      <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
+    </div>
+    <div class="time"><span class="hour"></span><span class="colon">:</span><span class="minute"></span><span class="colon">:</span><span class="secs"></span></div>
+  </div>
+
+<script>
+  // Locales to try (in order) when resolving a timezone abbreviation.
+  // Some locales' CLDR data don't have a short name for a given zone and
+  // silently fall back to a "GMT+n" style string instead -- try a couple
+  // of locales and use the first one that actually resolves to a real
+  // abbreviation (e.g. AEST, EDT) rather than a bare offset.
+  const LABEL_LOCALES = ['en-AU', 'en-US'];
+
+  function resolveTzLabel(tz, now) {
+    let abbr = null;
+    for (const locale of LABEL_LOCALES) {
+      const val = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: 'short' })
+        .formatToParts(now).find(p => p.type === 'timeZoneName').value;
+      if (!/^GMT/.test(val)) { abbr = val; break; }
+      if (!abbr) abbr = val; // keep as fallback if nothing better turns up
+    }
+    const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' })
+      .formatToParts(now).find(p => p.type === 'timeZoneName').value.replace('GMT', 'UTC');
+    // If the "abbreviation" we found is really just the offset restated,
+    // don't show it twice.
+    return /^(GMT|UTC)/.test(abbr) ? offset : `${abbr} · ${offset}`;
+  }
+
+  const rows = Array.from(document.querySelectorAll('.row')).map(row => {
+    const tz = row.dataset.tz;
+    return {
+      tz,
+      row,
+      hour: row.querySelector('.hour'),
+      minute: row.querySelector('.minute'),
+      secs: row.querySelector('.secs'),
+      dateEl: row.querySelector('.city-date'),
+      labelEl: row.querySelector('.tz-label'),
+      dotEl: row.querySelector('.dot'),
+      timeFmt: new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }),
+      dateFmt: new Intl.DateTimeFormat('en-AU', {
+        timeZone: tz,
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long'
+      }),
+      lastLabelMinute: -1
+    };
+  });
+
+  function tick() {
+    const now = new Date();
+
+    for (const r of rows) {
+      const parts = r.timeFmt.formatToParts(now);
+      const get = type => parts.find(p => p.type === type).value;
+      const hour24 = Number(get('hour'));
+
+      r.hour.textContent = get('hour');
+      r.minute.textContent = get('minute');
+      r.secs.textContent = get('second');
+      r.dateEl.textContent = r.dateFmt.format(now);
+
+      const isDay = hour24 >= 6 && hour24 < 18;
+      r.dotEl.classList.toggle('day', isDay);
+      r.dotEl.classList.toggle('night', !isDay);
+      r.row.classList.toggle('is-night', !isDay);
+
+      // Recomputing the tz label every second is wasted work -- it only
+      // ever changes on a DST transition, so once a minute is plenty.
+      const minuteNum = Number(get('minute'));
+      if (minuteNum !== r.lastLabelMinute) {
+        r.labelEl.textContent = resolveTzLabel(r.tz, now);
+        r.lastLabelMinute = minuteNum;
+      }
+    }
+
+    // Auto-dim the whole display late evening through early morning,
+    // Sydney time (this is the clock's "home" reference for viewing hours).
+    const sydneyHour = Number(
+      new Intl.DateTimeFormat('en-GB', { timeZone: 'Australia/Sydney', hour: '2-digit', hour12: false })
+        .format(now)
+    );
+    document.body.classList.toggle('night-dim', sydneyHour >= 22 || sydneyHour < 6);
+
+    requestAnimationFrame(() => setTimeout(tick, 1000 - (Date.now() % 1000)));
+  }
+
+  tick();
+
+  // Keep the screen awake where supported (iOS 16.4+). Fails silently on
+  // older iPadOS versions -- use Settings > Display & Brightness > Auto-Lock
+  // > Never on the iPad itself for reliable always-on behaviour.
+  if ('wakeLock' in navigator) {
+    let wakeLock = null;
+    const requestWakeLock = async () => {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+      } catch (e) { /* ignore */ }
+    };
+    requestWakeLock();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') requestWakeLock();
+    });
+  }
+</script>
+
+</body>
+</html>
