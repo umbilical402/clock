@@ -69,6 +69,7 @@
   }
 
   .city-name {
+    font-size: 1.6rem;
     font-size: clamp(1.1rem, 2.6vw, 2.1rem);
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -95,6 +96,7 @@
   }
 
   .sub-line {
+    font-size: 0.9rem;
     font-size: clamp(0.75rem, 1.3vw, 1.05rem);
     color: #555;
     margin-top: 0.35em;
@@ -108,6 +110,7 @@
   .time {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
+    font-size: 5rem;
     font-size: clamp(3rem, 12vw, 9rem);
     font-weight: 200;
     color: #f2f2f2;
@@ -139,6 +142,18 @@
   .home .city-name {
     color: #aaa;
   }
+
+  #fallback-msg {
+    display: none;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 1em 1.5em;
+    background: #200;
+    color: #f88;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    border-top: 1px solid #500;
+  }
 </style>
 </head>
 <body>
@@ -151,7 +166,7 @@
       </div>
       <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
     </div>
-    <div class="time"><span class="hour"></span><span class="colon">:</span><span class="minute"></span><span class="colon">:</span><span class="secs"></span></div>
+    <div class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></div>
   </div>
 
   <div class="row" data-tz="Australia/Brisbane">
@@ -162,7 +177,7 @@
       </div>
       <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
     </div>
-    <div class="time"><span class="hour"></span><span class="colon">:</span><span class="minute"></span><span class="colon">:</span><span class="secs"></span></div>
+    <div class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></div>
   </div>
 
   <div class="row" data-tz="America/Toronto">
@@ -173,112 +188,227 @@
       </div>
       <div class="sub-line"><span class="tz-label"></span> &middot; <span class="city-date"></span></div>
     </div>
-    <div class="time"><span class="hour"></span><span class="colon">:</span><span class="minute"></span><span class="colon">:</span><span class="secs"></span></div>
+    <div class="time"><span class="hour">--</span><span class="colon">:</span><span class="minute">--</span><span class="colon">:</span><span class="secs">--</span></div>
   </div>
 
-<script>
-  // Locales to try (in order) when resolving a timezone abbreviation.
-  // Some locales' CLDR data don't have a short name for a given zone and
-  // silently fall back to a "GMT+n" style string instead -- try a couple
-  // of locales and use the first one that actually resolves to a real
-  // abbreviation (e.g. AEST, EDT) rather than a bare offset.
-  const LABEL_LOCALES = ['en-AU', 'en-US'];
+  <div id="fallback-msg"></div>
 
-  function resolveTzLabel(tz, now) {
-    let abbr = null;
-    for (const locale of LABEL_LOCALES) {
-      const val = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: 'short' })
-        .formatToParts(now).find(p => p.type === 'timeZoneName').value;
-      if (!/^GMT/.test(val)) { abbr = val; break; }
-      if (!abbr) abbr = val; // keep as fallback if nothing better turns up
-    }
-    const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' })
-      .formatToParts(now).find(p => p.type === 'timeZoneName').value.replace('GMT', 'UTC');
-    // If the "abbreviation" we found is really just the offset restated,
-    // don't show it twice.
-    return /^(GMT|UTC)/.test(abbr) ? offset : `${abbr} · ${offset}`;
+<script>
+  // Written in old-fashioned ES5 (var, plain functions, no formatToParts /
+  // no exotic Intl timeZoneName styles like "shortOffset") on purpose: this
+  // clock is meant to run for years on an old iPad whose Safari/iOS can't be
+  // updated any more, so it deliberately avoids anything added to the
+  // language or the Intl API after roughly 2016.
+
+  function pad2(s) {
+    s = String(s);
+    return s.length < 2 ? '0' + s : s;
   }
 
-  const rows = Array.from(document.querySelectorAll('.row')).map(row => {
-    const tz = row.dataset.tz;
-    return {
-      tz,
-      row,
-      hour: row.querySelector('.hour'),
-      minute: row.querySelector('.minute'),
-      secs: row.querySelector('.secs'),
-      dateEl: row.querySelector('.city-date'),
-      labelEl: row.querySelector('.tz-label'),
-      dotEl: row.querySelector('.dot'),
-      timeFmt: new Intl.DateTimeFormat('en-GB', {
-        timeZone: tz,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      }),
-      dateFmt: new Intl.DateTimeFormat('en-AU', {
-        timeZone: tz,
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long'
-      }),
-      lastLabelMinute: -1
-    };
-  });
+  // Pulls "HH:MM:SS" out of a formatted time string regardless of the exact
+  // separators/spacing a given locale uses.
+  function extractHms(str) {
+    var m = str.match(/(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})/);
+    if (!m) return null;
+    return { hour: pad2(m[1]), minute: pad2(m[2]), second: pad2(m[3]) };
+  }
+
+  function getTimeParts(tz, date) {
+    var dtf = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
+    return extractHms(dtf.format(date));
+  }
+
+  // Works out the UTC offset (e.g. "UTC+10") by formatting the same instant
+  // in the target zone with plain numeric/2-digit fields (safe on very old
+  // engines) and comparing it against the real UTC timestamp -- instead of
+  // asking Intl for a "shortOffset" style string, which older Safari/iPadOS
+  // versions don't recognise and will throw on.
+  function getUtcOffsetLabel(tz, date) {
+    try {
+      // Include seconds here even though we don't display them -- without
+      // them the local reading is truncated to the start of its minute,
+      // which biases the diff below by up to 59 seconds and can round to
+      // the wrong minute (e.g. "+9:59" instead of "+10:00").
+      var dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+      var s = dtf.format(date);
+      var m = s.match(/(\d{1,2})\D(\d{1,2})\D(\d{4}).*?(\d{1,2})\D(\d{1,2})\D(\d{1,2})/);
+      if (!m) return '';
+      var asUTC = Date.UTC(Number(m[3]), Number(m[1]) - 1, Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]));
+      var diffMin = Math.round((asUTC - date.getTime()) / 60000);
+      var sign = diffMin >= 0 ? '+' : '-';
+      var abs = Math.abs(diffMin);
+      var h = Math.floor(abs / 60);
+      var mm = abs % 60;
+      return 'UTC' + sign + h + (mm ? ':' + pad2(mm) : '');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Tries to get a real abbreviation (AEST, EDT, ...). Some locales' CLDR
+  // data don't have one for a given zone and quietly fall back to a bare
+  // "GMT+n" string instead, so a couple of locales are tried in turn.
+  function getTzAbbr(tz, date) {
+    var locales = ['en-AU', 'en-US'];
+    var fallback = '';
+    for (var i = 0; i < locales.length; i++) {
+      try {
+        var str = new Intl.DateTimeFormat(locales[i], {
+          timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short'
+        }).format(date);
+        var tokens = str.replace(/,/g, ' ').trim().split(/\s+/);
+        var abbr = tokens[tokens.length - 1];
+        if (abbr && !/^(GMT|UTC)/i.test(abbr)) return abbr;
+        if (abbr && !fallback) fallback = abbr;
+      } catch (e) { /* try next locale */ }
+    }
+    return fallback;
+  }
+
+  function getTzLabel(tz, date) {
+    var abbr = getTzAbbr(tz, date);
+    var offset = getUtcOffsetLabel(tz, date);
+    if (!abbr || /^(GMT|UTC)/i.test(abbr)) return offset || abbr;
+    return offset ? (abbr + ' · ' + offset) : abbr;
+  }
+
+  function getDateLabel(tz, date) {
+    var dtf = new Intl.DateTimeFormat('en-AU', {
+      timeZone: tz, weekday: 'long', day: 'numeric', month: 'long'
+    });
+    return dtf.format(date);
+  }
+
+  function getLocalHour(tz, date) {
+    var parts = getTimeParts(tz, date);
+    return parts ? Number(parts.hour) : null;
+  }
+
+  function toArray(nodeList) {
+    return Array.prototype.slice.call(nodeList);
+  }
+
+  function buildRows() {
+    var rowEls = toArray(document.querySelectorAll('.row'));
+    var out = [];
+    for (var i = 0; i < rowEls.length; i++) {
+      var row = rowEls[i];
+      out.push({
+        tz: row.getAttribute('data-tz'),
+        row: row,
+        hourEl: row.querySelector('.hour'),
+        minuteEl: row.querySelector('.minute'),
+        secsEl: row.querySelector('.secs'),
+        dateEl: row.querySelector('.city-date'),
+        labelEl: row.querySelector('.tz-label'),
+        dotEl: row.querySelector('.dot'),
+        lastLabelMinute: -1
+      });
+    }
+    return out;
+  }
+
+  function showFallback(message) {
+    var el = document.getElementById('fallback-msg');
+    if (!el) return;
+    el.textContent = message;
+    el.style.display = 'block';
+  }
+
+  function setClass(el, cls, on) {
+    if (!el) return;
+    if (on) { el.classList.add(cls); } else { el.classList.remove(cls); }
+  }
+
+  var rows = [];
+  var tickFailCount = 0;
 
   function tick() {
-    const now = new Date();
+    try {
+      var now = new Date();
 
-    for (const r of rows) {
-      const parts = r.timeFmt.formatToParts(now);
-      const get = type => parts.find(p => p.type === type).value;
-      const hour24 = Number(get('hour'));
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        try {
+          var t = getTimeParts(r.tz, now);
+          if (t) {
+            r.hourEl.textContent = t.hour;
+            r.minuteEl.textContent = t.minute;
+            r.secsEl.textContent = t.second;
+          }
+          if (r.dateEl) r.dateEl.textContent = getDateLabel(r.tz, now);
 
-      r.hour.textContent = get('hour');
-      r.minute.textContent = get('minute');
-      r.secs.textContent = get('second');
-      r.dateEl.textContent = r.dateFmt.format(now);
+          var hour24 = t ? Number(t.hour) : null;
+          if (hour24 !== null) {
+            var isDay = hour24 >= 6 && hour24 < 18;
+            setClass(r.dotEl, 'day', isDay);
+            setClass(r.dotEl, 'night', !isDay);
+            setClass(r.row, 'is-night', !isDay);
+          }
 
-      const isDay = hour24 >= 6 && hour24 < 18;
-      r.dotEl.classList.toggle('day', isDay);
-      r.dotEl.classList.toggle('night', !isDay);
-      r.row.classList.toggle('is-night', !isDay);
+          // The tz label only ever changes on a DST transition -- once a
+          // minute is plenty, no need to recompute it every second.
+          var minuteNum = t ? Number(t.minute) : null;
+          if (r.labelEl && minuteNum !== r.lastLabelMinute) {
+            r.labelEl.textContent = getTzLabel(r.tz, now);
+            r.lastLabelMinute = minuteNum;
+          }
+        } catch (rowErr) {
+          // One city failing shouldn't blank out the others.
+        }
+      }
 
-      // Recomputing the tz label every second is wasted work -- it only
-      // ever changes on a DST transition, so once a minute is plenty.
-      const minuteNum = Number(get('minute'));
-      if (minuteNum !== r.lastLabelMinute) {
-        r.labelEl.textContent = resolveTzLabel(r.tz, now);
-        r.lastLabelMinute = minuteNum;
+      var sydneyHour = getLocalHour('Australia/Sydney', now);
+      if (sydneyHour !== null) {
+        setClass(document.body, 'night-dim', sydneyHour >= 22 || sydneyHour < 6);
+      }
+
+      tickFailCount = 0;
+    } catch (err) {
+      tickFailCount++;
+      if (tickFailCount === 3) {
+        showFallback('This Safari/iPadOS version is too old for some of the clock’s time-zone code. Let Glen know the exact error: ' + (err && err.message ? err.message : err));
       }
     }
 
-    // Auto-dim the whole display late evening through early morning,
-    // Sydney time (this is the clock's "home" reference for viewing hours).
-    const sydneyHour = Number(
-      new Intl.DateTimeFormat('en-GB', { timeZone: 'Australia/Sydney', hour: '2-digit', hour12: false })
-        .format(now)
-    );
-    document.body.classList.toggle('night-dim', sydneyHour >= 22 || sydneyHour < 6);
-
-    requestAnimationFrame(() => setTimeout(tick, 1000 - (Date.now() % 1000)));
+    if (window.requestAnimationFrame) {
+      requestAnimationFrame(function () {
+        setTimeout(tick, 1000 - (Date.now() % 1000));
+      });
+    } else {
+      setTimeout(tick, 1000 - (Date.now() % 1000));
+    }
   }
 
-  tick();
+  try {
+    rows = buildRows();
+    // Sanity-check that Intl can actually do timezone-aware formatting at
+    // all before starting the clock -- on a genuinely ancient Safari this
+    // throws immediately rather than a few seconds in.
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Australia/Sydney' }).format(new Date());
+    tick();
+  } catch (e) {
+    showFallback('This iPad’s Safari can’t do time-zone-aware clocks at all (' + (e && e.message ? e.message : e) + '). Let Glen know so he can build a version that doesn’t rely on it.');
+  }
 
   // Keep the screen awake where supported (iOS 16.4+). Fails silently on
   // older iPadOS versions -- use Settings > Display & Brightness > Auto-Lock
   // > Never on the iPad itself for reliable always-on behaviour.
   if ('wakeLock' in navigator) {
-    let wakeLock = null;
-    const requestWakeLock = async () => {
-      try {
-        wakeLock = await navigator.wakeLock.request('screen');
-      } catch (e) { /* ignore */ }
+    var wakeLock = null;
+    var requestWakeLock = function () {
+      navigator.wakeLock.request('screen').then(function (wl) {
+        wakeLock = wl;
+      }, function () { /* ignore */ });
     };
     requestWakeLock();
-    document.addEventListener('visibilitychange', () => {
+    document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') requestWakeLock();
     });
   }
